@@ -113,6 +113,8 @@ $getSharepointDrivesThread = {
 
 $folderCrawlThread = {
     param($syncVar,$poolIndex)
+    $emptyCounter = 0
+    $limit = 100
     function FeedResultToSyncVar{
         param($response)
         foreach ($item in $response.value) {
@@ -122,7 +124,7 @@ $folderCrawlThread = {
             }
             elseif ($item.file)
             {
-                $syncVar.files[$item.id] = $item
+                $syncVar.files[$item.id] = $item | select id,name,size,parentReference
                 $syncVar.fileQueue.Enqueue($item.id)
             }
         }
@@ -134,7 +136,10 @@ $folderCrawlThread = {
         $syncVar.folderQueue.TryDequeue([ref]$inputData)
         if (!$inputData)
         {
-            break
+            $emptyCounter++
+            if ($emptyCounter -ge $limit) {break}
+            Start-Sleep -Milliseconds (Get-Random -Minimum 100 -Maximum 500)
+            continue
         }
         if ($syncVar.activeFolders.Contains($inputData)) {
             continue
@@ -149,10 +154,6 @@ $folderCrawlThread = {
         {
             $response = Invoke-MgGraphRequest -Method GET -Uri $response.'@odata.nextLink'
             FeedResultToSyncVar -response $response
-        }
-        $syncVar.folderQueue.TryPeek([ref]$inputPeek)
-        if (!$inputPeek) {
-            break
         }
     }
     $syncVar.activeFolders[$poolIndex] = @('NaN','NaN')
@@ -178,12 +179,24 @@ $getFileVersionsThread = {
     }
     while($true)
     {
+        if ($syncVar.fileQueue.isEmpty)
+        {
+            if ($syncVar.folderQueue.isEmpty)
+            {
+                break
+            } else
+            {
+                Start-Sleep -Seconds 5
+                continue
+            }
+        } 
         $inputData = $null
         $inputPeek = $null
         $syncVar.fileQueue.TryDequeue([ref]$inputData)
         if (!$inputData)
         {
-            break
+            start-sleep -Seconds 5
+            continue
         }
         if ($syncVar.activeFiles.Contains($inputData)) {
             continue
@@ -198,10 +211,6 @@ $getFileVersionsThread = {
         {
             $response = Invoke-MgGraphRequest -Method GET -Uri $response.'@odata.nextLink'
             FeedResultToSyncVar -response $response
-        }
-        $syncVar.fileQueue.TryPeek([ref]$inputPeek)
-        if (!$inputPeek) {
-            break
         }
     }
     $syncVar.activeFiles[$poolIndex] = 'NaN'
@@ -272,9 +281,11 @@ $stopwatch.Elapsed.TotalSeconds
 $stopwatch.Stop()
 
 write-host total size of actual files
-(($syncvar.files.values.size) | measure-object -sum).sum / 1TB
+(($syncvar.files.values.size) | measure-object -sum).sum / 1GB
 write-host total size of the version history
-(($syncvar.versions.values | where {$_.count -gt 1}).size | measure-object -sum).sum / 1TB
+(($syncvar.versions.values | where {$_.count -gt 1}).size | measure-object -sum).sum / 1GB
 
+get-job | remove-job -Force
+[System.GC]::Collect()
 get-job | remove-job -Force
 [System.GC]::Collect()

@@ -287,5 +287,3 @@ write-host total size of the version history
 
 get-job | remove-job -Force
 [System.GC]::Collect()
-get-job | remove-job -Force
-[System.GC]::Collect()
